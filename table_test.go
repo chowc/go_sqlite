@@ -8,14 +8,14 @@ import (
 	"testing"
 )
 
-func TestTableFull(t *testing.T) {
+func TestTableInsert(t *testing.T) {
 	cleanup()
 	table, err := OpenDB(Options{DBPath: "db.sqlite"})
 	defer cleanup()
 
 	assert.Nil(t, err)
 	i := int32(0)
-	for ; i < TableMxRows; i++ {
+	for ; i <= RowsPerPage; i++ {
 		name := fmt.Sprintf("name-{%d}", i+1)
 		email := fmt.Sprintf("%s@example.com", name)
 		var a [32]byte
@@ -30,22 +30,6 @@ func TestTableFull(t *testing.T) {
 		assert.Equal(t, nil, err)
 		assert.EqualValues(t, i+1, table.RowNum)
 	}
-	rows, err := table.SelectAll()
-	assert.Nil(t, err)
-	assert.EqualValues(t, table.RowNum, len(rows))
-	name := fmt.Sprintf("name-{%d}", i)
-	email := fmt.Sprintf("%s@example.com", name)
-	var a [32]byte
-	copy(a[:], name)
-	var b [256]byte
-	copy(b[:], email)
-	err = table.InsertRow(Row{
-		ID:    i,
-		Name:  a,
-		Email: b,
-	})
-	assert.EqualValues(t, DBError{Code: TableFull}, err)
-	assert.EqualValues(t, i, table.RowNum)
 }
 
 func TestInsertAndSelect(t *testing.T) {

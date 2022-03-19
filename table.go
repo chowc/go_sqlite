@@ -13,7 +13,7 @@ const (
 	RowSize = int32(unsafe.Sizeof(Row{}))
 	RowsPerPage  = PageSize / RowSize
 	TableMaxPage = 100
-	TableMxRows  = TableMaxPage * RowsPerPage
+	// TableMaxRows = TableMaxPage * RowsPerPage
 )
 
 type Table struct {
@@ -147,51 +147,30 @@ func OpenDB(opts Options) (*Table, error) {
 }
 
 func (table *Table) InsertRow(row Row) error {
-	if table.RowNum >= TableMxRows {
-		return DBError{TableFull}
-	}
-	pageIndex := table.RowNum / RowsPerPage
-	page, err := table.Pager.GetPage(pageIndex)
+	cursor := table.TableEnd()
+	rowSlot, err := table.GetRowByCursor(&cursor)
 	if err != nil {
 		return err
 	}
-	if page == nil {
-		page = &Page{
-			Rows: [RowsPerPage]Row{},
-		}
-		if err := table.Pager.SetPage(pageIndex, page); err != nil {
-			return err
-		}
-	}
-	rowIndex := table.RowNum % RowsPerPage
-	page.Rows[rowIndex] = row
+	rowSlot.ID = row.ID
+	rowSlot.Name = row.Name
+	rowSlot.Email = row.Email
 	table.RowNum++
 	return nil
 }
 
-func (table *Table) GetRow(rowIndex int32) (*Row, error) {
-	if rowIndex >= table.RowNum {
-		return nil, DBError{Code: RowNotFound}
-	}
-	pageIdx := rowIndex / RowsPerPage
-	page, err := table.Pager.GetPage(pageIdx)
-	if err != nil {
-		return nil, err
-	}
-	rowOffset := rowIndex % RowsPerPage
-	row := page.Rows[rowOffset]
-	return &row, nil
-}
 
 func (table *Table) SelectAll() ([]Row, error) {
-	if table.RowNum == 0 {
-		return nil, nil
-	}
 	var rows []Row
-	for i := int32(0); i < table.RowNum; i++ {
-		row, err := table.GetRow(i)
+	cursor := table.TableStart()
+	for !cursor.EndOfTable {
+		row, err := table.GetRowByCursor(&cursor)
 		if err != nil {
 			return nil, err
+		}
+		cursor.Advance()
+		if row == nil {
+			continue
 		}
 		if row.ID == 0 {
 			continue
@@ -203,4 +182,53 @@ func (table *Table) SelectAll() ([]Row, error) {
 
 func (table *Table) Close() error {
 	return table.Pager.Flush()
+}
+
+func (table *Table) TableStart() Cursor {
+	return Cursor{
+		Table:      table,
+		RowNum:     0,
+		EndOfTable: table.RowNum == 0,
+	}
+}
+
+func (table *Table) TableEnd() Cursor {
+	return Cursor{
+		Table:      table,
+		RowNum:     table.RowNum,
+		EndOfTable: true,
+	}
+}
+
+type Cursor struct {
+	Table *Table
+	RowNum int32
+	EndOfTable bool
+}
+
+func (cursor *Cursor) Advance() {
+	if cursor.EndOfTable {
+		return
+	}
+	cursor.RowNum += 1
+	if cursor.RowNum >= cursor.Table.RowNum {
+		cursor.EndOfTable = true
+	}
+}
+
+func (table *Table) GetRowByCursor(cursor *Cursor) (*Row, error) {
+	pageIdx := cursor.RowNum / RowsPerPage
+	page, err := table.Pager.GetPage(pageIdx)
+	if err != nil {
+		return nil, err
+	}
+	if page == nil {
+		page = &Page{Rows: [RowsPerPage]Row{}}
+		err = table.Pager.SetPage(pageIdx, page)
+		if err != nil {
+			return nil, err
+		}
+	}
+	rowOffset := cursor.RowNum % RowsPerPage
+	return &page.Rows[rowOffset], nil
 }
