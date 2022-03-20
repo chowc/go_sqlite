@@ -8,61 +8,16 @@ import (
 	"testing"
 )
 
-func TestTableInsert(t *testing.T) {
+func TestInsertAndSelect(t *testing.T) {
 	cleanup()
 	table, err := OpenDB(Options{DBPath: "db.sqlite"})
 	defer cleanup()
 
 	assert.Nil(t, err)
-	i := int32(0)
-	for ; i <= RowsPerPage; i++ {
-		name := fmt.Sprintf("name-{%d}", i+1)
-		email := fmt.Sprintf("%s@example.com", name)
-		var a [32]byte
-		copy(a[:], name)
-		var b [256]byte
-		copy(b[:], email)
-		err := table.InsertRow(Row{
-			ID:    i+1,
-			Name:  a,
-			Email: b,
-		})
-		assert.Equal(t, nil, err)
-		assert.EqualValues(t, i+1, table.RowNum)
-	}
-}
-
-func TestInsertAndSelect(t *testing.T) {
-	table, err := OpenDB(Options{DBPath: "db.sqlite"})
-	defer cleanup()
 
 	assert.Nil(t, err)
 
-	var name [32]byte
-	copy(name[:], "john")
-	var email [256]byte
-	copy(email[:], "john@example.com")
-	row := Row{
-		ID:    1,
-		Name:  name,
-		Email: email,
-	}
-	err = table.InsertRow(row)
-	assert.EqualValues(t, nil, err)
-	assert.EqualValues(t, 1, table.RowNum)
-	rows, err := table.SelectAll()
-	assert.EqualValues(t, 1, len(rows))
-	assert.EqualValues(t, 1, rows[0].ID)
-	assert.EqualValues(t, "john", string(bytes.Trim(rows[0].Name[:], "\x00")))
-	assert.Equal(t, "john@example.com", string(bytes.Trim(rows[0].Email[:], "\x00")))
-}
-
-func TestInsertAndSelectInOrder(t *testing.T) {
-	table, err := OpenDB(Options{DBPath: "db.sqlite"})
-	defer cleanup()
-	assert.Nil(t, err)
-
-	for i:=int32(1); i<10; i++ {
+	for i := int32(0); i < RowsPerPage; i++ {
 		name := fmt.Sprintf("name-{%d}", i)
 		email := fmt.Sprintf("%s@example.com", name)
 		var a [32]byte
@@ -74,14 +29,51 @@ func TestInsertAndSelectInOrder(t *testing.T) {
 			Name:  a,
 			Email: b,
 		})
+		assert.Equal(t, nil, err)
+	}
+
+	rows, err := table.SelectAll()
+	assert.Equal(t, nil, err)
+	assert.EqualValues(t, RowsPerPage, len(rows))
+	for i := int32(0); i < RowsPerPage; i++ {
+		name := fmt.Sprintf("name-{%d}", i)
+		email := fmt.Sprintf("%s@example.com", name)
+		var a [32]byte
+		copy(a[:], name)
+		var b [256]byte
+		copy(b[:], email)
+
+		assert.EqualValues(t, i, rows[i].ID)
+		assert.EqualValues(t, name, string(bytes.Trim(rows[i].Name[:], "\x00")))
+		assert.Equal(t, email, string(bytes.Trim(rows[i].Email[:], "\x00")))
+	}
+
+}
+
+func TestInsertAndSelectInOrder(t *testing.T) {
+	table, err := OpenDB(Options{DBPath: "db.sqlite"})
+	defer cleanup()
+	assert.Nil(t, err)
+	idxSlice := []int32{2, 10, 11, 3, 5, 7, 1, 4, 8, 6, 9, 0}
+	for _, idx := range idxSlice{
+		name := fmt.Sprintf("name-{%d}", idx)
+		email := fmt.Sprintf("%s@example.com", name)
+		var a [32]byte
+		copy(a[:], name)
+		var b [256]byte
+		copy(b[:], email)
+		err := table.InsertRow(Row{
+			ID:    idx,
+			Name:  a,
+			Email: b,
+		})
 		assert.Nil(t, err)
-		assert.EqualValues(t, i, table.RowNum)
 	}
 	rows, err := table.SelectAll()
 	assert.Nil(t, err)
 	for idx, row := range rows {
-		assert.EqualValues(t, idx+1, row.ID)
-		name := fmt.Sprintf("name-{%d}", idx+1)
+		assert.EqualValues(t, idx, row.ID)
+		name := fmt.Sprintf("name-{%d}", idx)
 		email := fmt.Sprintf("%s@example.com", name)
 		var a [32]byte
 		copy(a[:], name)

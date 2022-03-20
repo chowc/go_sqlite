@@ -15,8 +15,8 @@ func (d DBError) Error() string {
 		msg = "Syntax error. Name too long."
 	case EmailTooLong:
 		msg = "Syntax error. Email too long."
-	case TableFull:
-		msg = "Table is full now"
+	case PageFull:
+		msg = "Page is full now"
 	case DBFileError:
 		msg = "DB open file fail"
 	case RowNotFound:
@@ -33,7 +33,7 @@ const (
 	InvalidStatement DBCode = iota
 	NameTooLong
 	EmailTooLong
-	TableFull
+	PageFull
 	DBFileError
 	RowNotFound
 	DBWriteFileError
