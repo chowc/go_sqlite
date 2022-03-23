@@ -9,19 +9,16 @@ import (
 	"strings"
 )
 
-var table *Table
-
 func main() {
 	var dbPath string
 	flag.StringVar(&dbPath, "file", "db.sqlite", "the db file")
 	flag.Parse()
 
-	t, err := OpenDB(Options{dbPath})
+	table, err := OpenDB(Options{dbPath})
 	if err != nil {
 		fmt.Printf("OpenDB fail:%v\n", err)
 		os.Exit(1)
 	}
-	table = t
 	for true {
 		print("> ")
 		reader := bufio.NewReader(os.Stdin)
@@ -31,7 +28,7 @@ func main() {
 			fmt.Printf("read input fail: %v\n", err)
 			continue
 		}
-		metaResult, err := DoMetaCommand(line)
+		metaResult, err := DoMetaCommand(table, line)
 		if err != nil {
 			fmt.Printf("%v\n", err)
 			continue
@@ -74,7 +71,7 @@ const (
 	MetaCommandUnknown
 )
 
-func DoMetaCommand(line string) (MetaCommandResult, error) {
+func DoMetaCommand(table *Table, line string) (MetaCommandResult, error) {
 	ss := strings.Split(strings.TrimSpace(line), " ")
 	if len(ss) == 0 {
 		return 0, DBError{InvalidStatement}

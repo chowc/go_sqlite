@@ -140,7 +140,6 @@ func OpenDB(opts Options) (*Table, error) {
 }
 
 func (table *Table) InsertRow(row Row) error {
-
 	cursor, err := table.Search(row.ID)
 	if err != nil {
 		return err
@@ -206,12 +205,13 @@ func (table *Table) TableStart() (Cursor, error) {
 	}
 	if page == nil {
 		cursor.EndOfTable = true
+		return cursor, nil
 	}
 	if page.NodeType == Leaf {
 		cursor.EndOfTable = page.NumCells==0
 		return cursor, nil
 	}
-	if page.KeyNums == 0 {
+	if page.ChildrenNum == 0 {
 		return cursor, nil
 	}
 	firstChildIdx := page.Children[0].PageNum
@@ -232,7 +232,6 @@ func (cursor *Cursor) Advance() {
 	}
 	cursor.CellNum++
 	page, _ := cursor.Table.Pager.GetPage(cursor.PageNum, false)
-	// fmt.Printf("page: %d, cursor: %+v\n", page.NumCells, cursor)
 	if cursor.CellNum >= page.NumCells {
 		if page.Sibling == 0 {
 			cursor.EndOfTable = true
@@ -280,7 +279,7 @@ func (table *Table) printTree(pageNum int32, level int) error {
 		break
 	case Internal:
 		indent(level)
-		fmt.Printf("- internal (size %d)\n", page.KeyNums)
+		fmt.Printf("- internal (size %d)\n", page.ChildrenNum)
 		for _, child := range page.Children {
 			table.printTree(child.PageNum, level+1)
 			indent(level+1)
