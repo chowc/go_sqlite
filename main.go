@@ -84,6 +84,9 @@ func DoMetaCommand(line string) (MetaCommandResult, error) {
 		table.Close()
 		os.Exit(0)
 		return MetaCommandSuccess, nil
+	case ".BTREE":
+		table.printTree(table.RootPageNum, 0)
+		return MetaCommandSuccess, nil
 	}
 	return MetaCommandUnknown, nil
 }

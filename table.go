@@ -24,13 +24,17 @@ type Pager struct {
 	FileLength int64
 }
 
+func (pager *Pager) GetNewPageNum() int32 {
+	return pager.PageNums
+}
+
 func (pager *Pager) GetPage(pageIdx int32, createIfNotExists bool) (*Page, error) {
 	page := pager.Pages[pageIdx]
 	if page != nil {
 		return page, nil
 	}
 
-	if int64(PageSize*pageIdx) >= pager.FileLength {
+	if pageIdx >= pager.PageNums {
 		if !createIfNotExists {
 			return nil, nil
 		}
@@ -52,6 +56,7 @@ func (pager *Pager) GetPage(pageIdx int32, createIfNotExists bool) (*Page, error
 			page.RootNode = true
 		}
 		pager.Pages[pageIdx] = page
+		pager.PageNums++
 		return page, nil
 	}
 
@@ -135,22 +140,33 @@ func OpenDB(opts Options) (*Table, error) {
 }
 
 func (table *Table) InsertRow(row Row) error {
-	// TODO: 避免 GetPage 两次
+
+	cursor, err := table.Search(row.ID)
+	if err != nil {
+		return err
+	}
+	return table.Insert(cursor, row)
+}
+
+func (table *Table) Search(key int32) (*Cursor, error) {
 	page, err := table.Pager.GetPage(table.RootPageNum, true)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	cursor, err := page.LeafNodeSearch(table, row.ID)
+	cursor, err := page.LeafNodeSearch(table, key)
+	if err != nil {
+		return nil, err
+	}
+
+	return &cursor, nil
+}
+
+func (table *Table) Insert(cursor *Cursor, row Row) error {
+	page, err := table.Pager.GetPage(cursor.PageNum, true)
 	if err != nil {
 		return err
 	}
-
-	if cursor.CellNum == RowsPerPage {
-		panic("page split not implemented yet")
-		// table.Split(page)
-	}
-	// determine which page to insert
-	return page.LeafNodeInsert(row, &cursor)
+	return page.Insert(row, cursor)
 }
 
 func (table *Table) SelectAll() ([]Row, error) {
@@ -191,7 +207,15 @@ func (table *Table) TableStart() (Cursor, error) {
 	if page == nil {
 		cursor.EndOfTable = true
 	}
-
+	if page.NodeType == Leaf {
+		cursor.EndOfTable = page.NumCells==0
+		return cursor, nil
+	}
+	if page.KeyNums == 0 {
+		return cursor, nil
+	}
+	firstChildIdx := page.Children[0].PageNum
+	cursor.PageNum = firstChildIdx
 	return cursor, nil
 }
 
@@ -210,9 +234,12 @@ func (cursor *Cursor) Advance() {
 	page, _ := cursor.Table.Pager.GetPage(cursor.PageNum, false)
 	// fmt.Printf("page: %d, cursor: %+v\n", page.NumCells, cursor)
 	if cursor.CellNum >= page.NumCells {
-		// TODO: when right sibling point is nil, then end.
-		cursor.EndOfTable = true
-		return
+		if page.Sibling == 0 {
+			cursor.EndOfTable = true
+			return
+		}
+		cursor.PageNum = page.Sibling
+		cursor.CellNum = 0
 	}
 }
 
@@ -232,31 +259,36 @@ func (table *Table) GetRowByCursor(cursor *Cursor, insert bool) (*Row, error) {
 	return &page.Rows[rowOffset], nil
 }
 
-func (table *Table) Split(oldPage *Page) error {
-	// parentPage, err := table.Pager.GetPage(oldPage.ParentNode, false)
-	// if err != nil {
-	// 	return err
-	// }
-	// newPage, err := table.Pager.GetPage(table.PageNums+1, true)
-	// if err != nil {
-	// 	return err
-	// }
-	// newPage.ParentNode = oldPage.ParentNode
-	// oldPageCells := oldPage.NumCells
-	// for idx := oldPageCells/2; idx < oldPageCells; idx++ {
-	// 	newPage.Rows[newPage.NumCells] = oldPage.Rows[idx]
-	// 	newPage.NumCells++
-	//
-	// 	oldPage.Rows[idx] = Row{}
-	// 	oldPage.NumCells--
-	// }
-	// oldMax := oldPage.Rows[oldPage.NumCells-1].ID
-	// newMax := newPage.Rows[newPage.NumCells-1].ID
-	// newPage.Sibling = oldPage.Sibling
-	// oldPage.Sibling = table.PageNums+1
-	// table.PageNums++
-
-	// 1. replace oldMax
-	// 2. insert new key into parentNode
+func (table *Table) printTree(pageNum int32, level int) error {
+	indent := func(level int) {
+		for i:=0; i<level; i++ {
+			print(" ")
+		}
+	}
+	page, err := table.Pager.GetPage(pageNum, false)
+	if err != nil {
+		return err
+	}
+	switch page.NodeType {
+	case Leaf:
+		indent(level)
+		fmt.Printf("- leaf (size %d)\n", page.NumCells)
+		for _, row := range page.Rows {
+			indent(level+1)
+			fmt.Printf("- %d\n", row.ID)
+		}
+		break
+	case Internal:
+		indent(level)
+		fmt.Printf("- internal (size %d)\n", page.KeyNums)
+		for _, child := range page.Children {
+			table.printTree(child.PageNum, level+1)
+			indent(level+1)
+			fmt.Printf("- key %d\n", child.Key)
+		}
+		rightMostChildIdx := page.RightmostChild
+		table.printTree(rightMostChildIdx, level+1)
+	}
 	return nil
 }
+

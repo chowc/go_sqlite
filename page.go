@@ -47,6 +47,7 @@ type LeafNodeHeader struct {
 
 type InternalNodeHeader struct {
 	KeyNums int32
+	RightmostChild int32
 }
 
 type Child struct {
@@ -83,8 +84,6 @@ func (page *Page) ToBytes() ([]byte, error) {
 	}
 	pageBytes := headerBuf.Bytes()
 	pageBytes = append(pageBytes, buf.Bytes()...)
-	// fmt.Printf("len: %d\n", len(pageBytes))
-	// fmt.Printf("page: %+v\n", pageBytes)
 	if len(pageBytes) > PageSize {
 		panic("page size > PageSize, seems like a bug")
 	}
@@ -113,15 +112,13 @@ func FromBytes(bs [PageSize]byte) Page {
 	return page
 }
 
-func (page *Page) LeafNodeInsert(row Row, cursor *Cursor) error {
+func (page *Page) Insert(row Row, cursor *Cursor) error {
 	if page.NodeType != Leaf {
-		panic("insert into internal node not implemented yet")
+		panic("page should be leaf node")
 	}
-	// if cursor.CellNum >= RowsPerPage {
-	// 	return DBError{PageFull}
-	// }
+
 	if page.NumCells >= RowsPerPage {
-		panic("page full")
+		return page.SplitAndInsert(row, cursor)
 	}
 
 	for i:=page.NumCells; i>cursor.CellNum; i-- {
@@ -130,6 +127,77 @@ func (page *Page) LeafNodeInsert(row Row, cursor *Cursor) error {
 	}
 	page.Rows[cursor.CellNum] = row
 	page.NumCells++
+	return nil
+}
+
+func (page *Page) SplitAndInsert(row Row, cursor *Cursor) error {
+	table := cursor.Table
+	newPageIdx := table.Pager.GetNewPageNum()
+	newPage, err := table.Pager.GetPage(newPageIdx, true)
+	if err != nil {
+		return err
+	}
+	// move right half rows from old page to new page
+	halfPageCount := (RowsPerPage+1)/2
+	for i:=RowsPerPage; i>=0; i-- {
+		var target *Page
+		if i >= halfPageCount {
+			target = newPage
+			// fmt.Printf("i %d -> newPage\n", i)
+		} else {
+			target = page
+			// fmt.Printf("i %d -> oldPage\n", i)
+		}
+
+		if i == cursor.CellNum {
+			target.Rows[i%halfPageCount] = row
+			// fmt.Printf("insert row %d at index %d\n", row.ID, i%halfPageCount)
+		} else if i > cursor.CellNum {
+			// fmt.Printf("insert row %d at index %d\n", page.Rows[i-1].ID, i%halfPageCount)
+			target.Rows[i%halfPageCount] = page.Rows[i-1]
+		} else {
+			// fmt.Printf("insert row %d at index %d\n", page.Rows[i].ID, i%halfPageCount)
+			target.Rows[i%halfPageCount] = page.Rows[i]
+		}
+	}
+	newPage.NumCells = halfPageCount
+	page.NumCells = halfPageCount
+	if page.RootNode {
+		err = CreateNewRoot(table, newPageIdx)
+		if err != nil {
+			return err
+		}
+		newPage.ParentNode = table.RootPageNum
+		newPage.Sibling = 0 // End
+	} else {
+		panic("Need to implement updating parent after split")
+	}
+
+	return nil
+}
+
+func CreateNewRoot(table *Table, rightChildIdx int32) error {
+	leftChildIdx := table.Pager.GetNewPageNum()
+	leftChild, err := table.Pager.GetPage(leftChildIdx, true)
+	if err != nil {
+		return err
+	}
+	// copy root to left child
+	rootPage, err := table.Pager.GetPage(table.RootPageNum, false)
+	if err != nil {
+		return err
+	}
+	leftChild.LeafNode = rootPage.LeafNode
+	leftChild.RootNode = false
+	leftChild.NodeType = Leaf
+	leftChild.ParentNode = table.RootPageNum
+	rootPage.LeafNode = LeafNode{}
+	rootPage.KeyNums = 1
+	rootPage.NodeType = Internal
+	rootPage.Children[0].PageNum = leftChildIdx
+	rootPage.Children[0].Key = leftChild.Rows[leftChild.NumCells-1].ID
+	rootPage.RightmostChild = rightChildIdx
+	leftChild.Sibling = rightChildIdx
 	return nil
 }
 
@@ -158,7 +226,29 @@ func (page *Page) LeafNodeSearch(table *Table, key int32) (Cursor, error) {
 		}
 		cursor.CellNum = left
 	case Internal:
-		panic("internal node search not implemented yet")
+		if page.KeyNums == 0 {
+			panic("empty children cannot be internal")
+		}
+		left := int32(0)
+		right := page.KeyNums
+		mid := left + (right-left)/2
+		for left < right {
+			midKey := page.Children[mid]
+			if midKey.Key == key {
+				break
+			} else if midKey.Key < key {
+				left = mid+1
+			} else {
+				right = mid
+			}
+			mid = left + (right-left)/2
+		}
+		cursor.PageNum = mid
+		newPage, err := table.Pager.GetPage(mid, false)
+		if err != nil {
+			return cursor, err
+		}
+		return newPage.LeafNodeSearch(table, key)
 	}
 
 	return cursor, nil
