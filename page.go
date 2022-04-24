@@ -6,6 +6,15 @@ import (
 	"unsafe"
 )
 
+type PageType int
+
+const (
+	PageInternal PageType = iota
+	PageLeft
+	PageOverflow
+	PageFree
+)
+
 const (
 	PageSize     = 1 << 12
 	RowSize = int32(unsafe.Sizeof(Row{}))
